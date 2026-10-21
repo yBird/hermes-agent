@@ -686,9 +686,17 @@ def _execute_remote(code: str, task_id: Optional[str], enabled_tools: Optional[l
                 max_tool_calls=max_tool_calls, reset=bool(reset),
                 idle_exit=int(_cfg.get("kernel_idle_timeout", 1800)),
             )
-        except Exception:
-            logger.warning("remote session-kernel path failed; falling back to per-call", exc_info=True)
-            kernel_result = None
+        except Exception:  # health: allow BLE001 -- Post-commit uncertainty must fail closed; raw tracebacks can leak source/secrets.
+            # A transport failure may follow a committed cell. Only the helper's
+            # explicit pre-dispatch None permits per-call fallback, never an exception.
+            logger.warning("remote session-kernel outcome uncertain; refusing replay")
+            return json.dumps(_remote_result(
+                "error", "", exec_start,
+                {"error": "Remote session-kernel outcome is uncertain. DO NOT REPLAY this code; "
+                          "it may already have run. Verify its effects before taking further action.",
+                 "outcome_uncertain": True, "tool_calls_made": None,
+                 "tool_calls_log": [], "retry_policy": "never automatically replay"},
+                kernel={"remote": True}), ensure_ascii=False)
         if kernel_result is not None:
             return _finish_remote_kernel_result(kernel_result, timeout=timeout, exec_start=exec_start)
         logger.info("remote session kernel unavailable on %s; using per-call path", env_type)
